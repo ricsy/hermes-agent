@@ -868,8 +868,21 @@ def get_cute_tool_message(
             return line
         return f"{line}{failure_suffix}"
 
-    # Emoji resolved from skin tool_emojis override → registry emoji → default
-    emoji = get_tool_emoji(tool_name, "⚡")
+    # Emoji: skin tool_emojis override → registry emoji → original hardcoded default
+    _DEFAULTS = {
+        "web_search": "🔍", "web_extract": "📄", "web_crawl": "🕸️",
+        "terminal": "💻", "process": "⚙️", "read_file": "📖", "write_file": "✍️",
+        "patch": "🔧", "search_files": "🔎", "browser_navigate": "🌐",
+        "browser_snapshot": "📸", "browser_click": "👆", "browser_type": "⌨️",
+        "browser_back": "◀️", "browser_press": "⌨️", "browser_get_images": "🖼️",
+        "browser_vision": "👁️", "todo": "📋", "session_search": "🔍",
+        "memory": "🧠", "skills_list": "📚", "skill_view": "📚",
+        "image_generate": "🎨", "text_to_speech": "🔊", "vision_analyze": "👁️",
+        "mixture_of_agents": "🧠", "send_message": "📨", "cronjob": "⏰",
+        "execute_code": "🐍", "delegate_task": "🔀",
+    }
+    default = _DEFAULTS.get(tool_name, "⚡")
+    emoji = get_tool_emoji(tool_name, default)
 
     if tool_name == "web_search":
         return _wrap(f"┊ {emoji} search    {_trunc(args.get('query', ''), 42)}  {dur}")
