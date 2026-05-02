@@ -55,8 +55,27 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit import print_formatted_text as _pt_print
 from prompt_toolkit.formatted_text import ANSI as _PT_ANSI
 try:
-    from prompt_toolkit.cursor_shapes import CursorShape
-    _STEADY_CURSOR = CursorShape.LINE  # Non-blinking vertical bar — does not obscure characters
+    from prompt_toolkit.cursor_shapes import CursorShape, CursorShapeConfig
+    from prompt_toolkit.application import Application
+    from abc import ABC, abstractmethod
+
+    class _DynamicCursorShapeConfig(CursorShapeConfig):
+        """
+        Dynamically switch cursor shape based on cursor position:
+        - BLOCK at end of text  → append mode, bold renders normally
+        - UNDERLINE in middle   → does NOT obscure the character underneath
+        """
+        def get_cursor_shape(self, app: Application) -> CursorShape:
+            try:
+                buf = app.current_buffer
+                if buf is not None and buf.text:
+                    if buf.cursor_position >= len(buf.text):
+                        return CursorShape.BLOCK
+                return CursorShape.UNDERLINE
+            except Exception:
+                return CursorShape.BLOCK
+
+    _STEADY_CURSOR = _DynamicCursorShapeConfig()
 except (ImportError, AttributeError):
     _STEADY_CURSOR = None
 import threading
