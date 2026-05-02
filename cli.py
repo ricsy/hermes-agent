@@ -59,11 +59,15 @@ try:
     from prompt_toolkit.application import Application
     from abc import ABC, abstractmethod
 
+    # prompt_toolkit 3.0.x has BEAM (\x1b[6 q, vertical bar │) but no LINE.
+    # We name it semantically here so the code reads clearly.
+    _CURSOR_LINE = CursorShape.BEAM  # vertical bar, does NOT obscure characters
+
     class _DynamicCursorShapeConfig(CursorShapeConfig):
         """
         Dynamically switch cursor shape based on cursor position:
         - BLOCK at end of text  → append mode, bold renders normally
-        - UNDERLINE in middle   → does NOT obscure the character underneath
+        - LINE  in middle      → vertical bar, does NOT obscure characters
         """
         def get_cursor_shape(self, app: Application) -> CursorShape:
             try:
@@ -71,7 +75,7 @@ try:
                 if buf is not None and buf.text:
                     if buf.cursor_position >= len(buf.text):
                         return CursorShape.BLOCK
-                return CursorShape.UNDERLINE
+                return _CURSOR_LINE
             except Exception:
                 return CursorShape.BLOCK
 
