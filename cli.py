@@ -1248,6 +1248,131 @@ def _render_final_assistant_content(text: str, mode: str = "render"):
     return Markdown(plain)
 
 
+# ── Streaming markdown renderer ─────────────────────────────────────────────────
+
+# Rich markup constants used by _stream_render_line
+_RICH_BOLD = "[bold]"
+_RICH_BOLD_END = "[/bold]"
+_RICH_ITALIC = "[italic]"
+_RICH_ITALIC_END = "[/italic]"
+_RICH_BOLD_ITALIC = "[bold italic]"
+_RICH_BOLD_ITALIC_END = "[/bold italic]"
+_RICH_STRIKE = "[s]"
+_RICH_STRIKE_END = "[/s]"
+_RICH_CODE = "[cyan]"
+_RICH_CODE_END = "[/cyan]"
+
+
+# Pre-compiled regexes (module-level for performance — compile once, reuse).
+# Defined before _stream_render_line so the names are resolved at parse time.
+_STREAM_RE_CODE = re.compile(r"(?<!`)`([^`\n]+?)`(?!`)")  # `code`
+_STREAM_RE_HEADING = re.compile(r"^#{1,6}\s+(.*)$", re.MULTILINE)  # ## Heading
+_STREAM_RE_BOLD_ITALIC = re.compile(r"(?<!\*)\*\*\*([^*\n]+?)\*\*\*(?!\*)")  # ***text***
+_STREAM_RE_BOLD = re.compile(r"(?<!\*)\*\*([^*\n]+?)\*\*(?!\*)")  # **text**
+_STREAM_RE_ITALIC = re.compile(
+    r"(?<![^\s\-*|>])\*([^*\n]+?)\*(?!\*)"
+)  # *text* (guarded)
+_STREAM_RE_STRIKE = re.compile(r"~~([^~\n]+?)~~")  # ~~text~~
+_STREAM_RE_LINK = re.compile(r"\[([^\]]+)\]\([^)\s]+\)")  # [text](url)
+
+
+def _stream_render_line(text: str) -> str:
+    """Render a single line of streamed text with inline Rich markdown markup.
+
+    This is the streaming-compatible alternative to Rich's :class:`Markdown`
+    renderer.  It applies markup progressively, line-by-line, without needing
+    the full document up front.  Incomplete markup sequences (e.g. an unclosed
+    ``**`` because the next token hasn't arrived yet) are left as plain text —
+    no corruption, no garbled output.
+
+    Security: existing ANSI escapes are stripped *before* any markdown
+    processing so that malicious input like ``\\x1b[31m**red bold**\\x1b[0m``
+    cannot inject arbitrary terminal control sequences.
+
+    Processing order (important — backtick-first to avoid ``*`` inside code
+    spans being consumed by the italic pattern):
+
+      1. Strip existing ANSI
+    # 2. Strip heading markers (## Heading)
+    # 3. Code spans
+    # 4. Bold-italic (***text***) → bold italic
+    # 5. Bold (**text**)           → bold
+    # 6. Italic (*text*)            → italic
+    # 7. Strikethrough (~~text~~) → strikethrough
+    # 8. Links ([text](url))       → just show text
+
+    Parameters
+    ----------
+    text
+        A single line of streamed content (no embedded newlines).  May contain
+        ANSI escape sequences, partial markup, or plain text.
+
+    Returns
+    -------
+    str
+        The line with Rich markup tags embedded.  Use with prompt_toolkit's
+        :func:`print_formatted_text` or Rich's :class:`Console` to render.
+    """
+    if not text:
+        return ""
+
+    # 1. Strip existing ANSI escapes first (security hardening)
+    plain = _rich_text_from_ansi(text).plain
+
+    # Guard against pathologically long lines (ReDoS / OOM prevention)
+    if len(plain) > 200_000:
+        plain = plain[:200_000]
+
+    # 2. Strip heading markers (## Heading) — Rich has no inline heading markup;
+    #    headings are block-level.  Remove ``## `` from line start only.
+    plain = _STREAM_RE_HEADING.sub(r"\1", plain)
+
+    # 3. Code spans — must be processed before italic/bold to avoid
+    #    `` `code` `` being mangled by asterisk patterns.
+    #    Match backtick pairs; leave unclosed backtick as literal.
+    plain = _STREAM_RE_CODE.sub(lambda m: _RICH_CODE + m.group(1) + _RICH_CODE_END, plain)
+
+    # 3. Bold-italic (***text***) — must precede bold and italic
+    plain = _STREAM_RE_BOLD_ITALIC.sub(
+        lambda m: _RICH_BOLD_ITALIC + m.group(1) + _RICH_BOLD_ITALIC_END, plain
+    )
+
+    # 4. Bold (**text**)
+    plain = _STREAM_RE_BOLD.sub(
+        lambda m: _RICH_BOLD + m.group(1) + _RICH_BOLD_END, plain
+    )
+
+    # 5. Italic (*text*) — careful NOT to consume list markers:
+    #    a leading ``- *item*`` or ``* item`` should stay as-is.
+    #    We guard the leading ``*`` with a negative lookbehind that excludes
+    #    line-start, ``- ``, ``* ``, ``1. ``, ``> ``, and ``| ``.
+    plain = _STREAM_RE_ITALIC.sub(
+        lambda m: _RICH_ITALIC + m.group(1) + _RICH_ITALIC_END, plain
+    )
+
+    # 6. Strikethrough
+    plain = _STREAM_RE_STRIKE.sub(
+        lambda m: _RICH_STRIKE + m.group(1) + _RICH_STRIKE_END, plain
+    )
+
+    # 7. Links [text](url) → show text only
+    plain = _STREAM_RE_LINK.sub(lambda m: m.group(1), plain)
+
+    return plain
+
+
+# Pre-compiled regexes (module-level for performance — compile once, reuse).
+# These are module-level so they are shared across all calls and not recompiled.
+_STREAM_RE_CODE = re.compile(r"(?<!`)`([^`\n]+?)`(?!`)")  # `code` but not `` or ` at line end
+_STREAM_RE_BOLD_ITALIC = re.compile(r"(?<!\*)\*\*\*([^*\n]+?)\*\*\*(?!\*)")  # ***text***
+_STREAM_RE_BOLD = re.compile(r"(?<!\*)\*\*([^*\n]+?)\*\*(?!\*)")  # **text**
+_STREAM_RE_ITALIC = re.compile(
+    r"(?<![^\s\-*|>])\*([^*\n]+?)\*(?!\*)"
+)  # *text* but not after word chars
+_STREAM_RE_STRIKE = re.compile(r"~~([^~\n]+?)~~")  # ~~text~~
+_STREAM_RE_LINK = re.compile(r"\[([^\]]+)\]\([^)\s]+\)")  # [text](url)
+
+
 def _cprint(text: str):
     """Print ANSI-colored text through prompt_toolkit's native renderer.
 
@@ -3186,6 +3311,8 @@ class HermesCLI:
             line, self._stream_buf = self._stream_buf.split("\n", 1)
             if self.final_response_markdown == "strip":
                 line = _strip_markdown_syntax(line)
+            elif self.final_response_markdown == "render":
+                line = _stream_render_line(line)
             _cprint(f"{_STREAM_PAD}{_tc}{line}{_RST}" if _tc else f"{_STREAM_PAD}{line}")
 
     def _flush_stream(self) -> None:
@@ -3203,7 +3330,12 @@ class HermesCLI:
 
         if self._stream_buf:
             _tc = getattr(self, "_stream_text_ansi", "")
-            line = _strip_markdown_syntax(self._stream_buf) if self.final_response_markdown == "strip" else self._stream_buf
+            if self.final_response_markdown == "strip":
+                line = _strip_markdown_syntax(self._stream_buf)
+            elif self.final_response_markdown == "render":
+                line = _stream_render_line(self._stream_buf)
+            else:
+                line = self._stream_buf
             _cprint(f"{_STREAM_PAD}{_tc}{line}{_RST}" if _tc else f"{_STREAM_PAD}{line}")
             self._stream_buf = ""
 
