@@ -56,7 +56,7 @@ from prompt_toolkit import print_formatted_text as _pt_print
 from prompt_toolkit.formatted_text import ANSI as _PT_ANSI
 try:
     from prompt_toolkit.cursor_shapes import CursorShape
-    _STEADY_CURSOR = CursorShape.BLOCK  # Non-blinking block cursor
+    _STEADY_CURSOR = CursorShape.LINE  # Non-blinking vertical bar — does not obscure characters
 except (ImportError, AttributeError):
     _STEADY_CURSOR = None
 import threading
